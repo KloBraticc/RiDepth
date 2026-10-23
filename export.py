@@ -7,7 +7,7 @@ import onnxruntime
 import torch
 from onnxconverter_common import float16
 
-from ridepth.model import RiDepthNet
+from ridepth.model import VARIANTS
 
 CHECK_SIZES = ((154, 266), (294, 518))
 
@@ -25,11 +25,12 @@ class Exported(torch.nn.Module):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--weights", type=Path)
+    parser.add_argument("--variant", choices=sorted(VARIANTS), default="base")
     parser.add_argument("--output", type=Path, default=Path("exports/ridepth.onnx"))
     parser.add_argument("--fp16", action="store_true")
     arguments = parser.parse_args()
 
-    model = RiDepthNet(pretrained=arguments.weights is None)
+    model = VARIANTS[arguments.variant](pretrained=arguments.weights is None)
     if arguments.weights:
         model.load_state_dict(torch.load(arguments.weights, map_location="cpu"))
     model.eval()

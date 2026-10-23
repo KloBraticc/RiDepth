@@ -6,13 +6,22 @@ import torch
 from torch.utils.data import DataLoader
 
 from ridepth.data import RobloxDepth, find_samples
-from ridepth.losses import depth_losses
-from ridepth.model import RiDepthNet
+from ridepth.losses import align_scale, depth_losses, normalize_target
+from ridepth.model import VARIANTS, RiDepthNet
 
-WEIGHTS = {"depth": 1.0, "gradient": 0.5, "normal": 0.5}
+WEIGHTS = {"depth": 1.0, "gradient": 0.5, "normal": 0.5, "teacher_depth": 0.5, "teacher_normal": 0.25}
 
 
-def run_epoch(model, loader, device, optimizer=None, scaler=None):
+def teacher_losses(disparity, normals, teacher_disparity, teacher_normals):
+    everything = torch.ones_like(teacher_disparity, dtype=torch.bool)
+    target = normalize_target(teacher_disparity, everything)
+    return {
+        "teacher_depth": (align_scale(disparity, target) - target).abs().mean(),
+        "teacher_normal": (1 - (normals * teacher_normals).sum(1)).mean(),
+    }
+
+
+def run_epoch(model, loader, device, optimizer=None, scaler=None, teacher=None):
     training = optimizer is not None
     model.train(training)
     totals = {}
@@ -25,6 +34,10 @@ def run_epoch(model, loader, device, optimizer=None, scaler=None):
         with torch.set_grad_enabled(training), torch.autocast(device.type, enabled=device.type == "cuda"):
             predicted, normals = model(image)
         losses = depth_losses(predicted.float(), normals.float(), disparity, normal, solid)
+        if teacher is not None:
+            with torch.no_grad(), torch.autocast(device.type, enabled=device.type == "cuda"):
+                teacher_disparity, teacher_normals = teacher(image)
+            losses.update(teacher_losses(predicted.float(), normals.float(), teacher_disparity.float(), teacher_normals.float()))
         loss = sum(WEIGHTS[name] * value for name, value in losses.items())
         if training:
             optimizer.zero_grad(set_to_none=True)
@@ -46,6 +59,8 @@ def main():
     parser.add_argument("--learning-rate", type=float, default=4e-4)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--resume", type=Path)
+    parser.add_argument("--variant", choices=sorted(VARIANTS), default="base")
+    parser.add_argument("--teacher", type=Path)
     arguments = parser.parse_args()
 
     samples = find_samples(arguments.data)
@@ -58,9 +73,16 @@ def main():
     print(f"training on {len(train_set)} samples, validating on {len(validation_set)}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = RiDepthNet(pretrained=arguments.resume is None).to(device)
+    model = VARIANTS[arguments.variant](pretrained=arguments.resume is None).to(device)
     if arguments.resume:
         model.load_state_dict(torch.load(arguments.resume, map_location=device))
+    teacher = None
+    if arguments.teacher:
+        teacher = RiDepthNet(pretrained=False).to(device)
+        teacher.load_state_dict(torch.load(arguments.teacher, map_location=device))
+        teacher.eval()
+        for parameter in teacher.parameters():
+            parameter.requires_grad_(False)
     optimizer = torch.optim.AdamW(model.parameters(), lr=arguments.learning_rate, weight_decay=1e-4)
     schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, arguments.epochs)
     scaler = torch.amp.GradScaler(enabled=device.type == "cuda")
@@ -70,10 +92,10 @@ def main():
     arguments.runs.mkdir(parents=True, exist_ok=True)
     best = float("inf")
     for epoch in range(1, arguments.epochs + 1):
-        trained = run_epoch(model, train_loader, device, optimizer, scaler)
+        trained = run_epoch(model, train_loader, device, optimizer, scaler, teacher)
         validated = run_epoch(model, validation_loader, device)
         schedule.step()
-        score = sum(WEIGHTS[name] * value for name, value in validated.items())
+        score = sum(WEIGHTS[name] * value for name, value in validated.items() if not name.startswith("teacher"))
         print(f"epoch {epoch}: train {trained} validation {validated}")
         torch.save(model.state_dict(), arguments.runs / "last.pt")
         if score < best:
