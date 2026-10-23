@@ -7,3 +7,4 @@ exports/
 *.onnx
 *.onnx_data
 *.pt
+gameplay/

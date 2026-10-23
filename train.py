@@ -3,9 +3,9 @@ import random
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader
 
-from ridepth.data import RobloxDepth, find_samples
+from ridepth.data import GameplayDepth, RobloxDepth, find_gameplay, find_samples
 from ridepth.losses import align_scale, depth_losses, normalize_target
 from ridepth.model import VARIANTS, RiDepthNet
 
@@ -26,14 +26,15 @@ def run_epoch(model, loader, device, optimizer=None, scaler=None, teacher=None):
     model.train(training)
     totals = {}
     count = 0
-    for image, disparity, normal, solid in loader:
+    for image, disparity, normal, solid, exact in loader:
         image = image.to(device, non_blocking=True)
         disparity = disparity.to(device, non_blocking=True)
         normal = normal.to(device, non_blocking=True)
         solid = solid.to(device, non_blocking=True)
+        exact = exact.to(device, non_blocking=True)
         with torch.set_grad_enabled(training), torch.autocast(device.type, enabled=device.type == "cuda"):
             predicted, normals = model(image)
-        losses = depth_losses(predicted.float(), normals.float(), disparity, normal, solid)
+        losses = depth_losses(predicted.float(), normals.float(), disparity, normal, solid, exact)
         if teacher is not None:
             with torch.no_grad(), torch.autocast(device.type, enabled=device.type == "cuda"):
                 teacher_disparity, teacher_normals = teacher(image)
@@ -53,6 +54,7 @@ def run_epoch(model, loader, device, optimizer=None, scaler=None, teacher=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=Path, default=Path("data"))
+    parser.add_argument("--gameplay", type=Path, default=Path("gameplay"))
     parser.add_argument("--runs", type=Path, default=Path("runs"))
     parser.add_argument("--epochs", type=int, default=60)
     parser.add_argument("--batch", type=int, default=12)
@@ -64,13 +66,17 @@ def main():
     arguments = parser.parse_args()
 
     samples = find_samples(arguments.data)
-    if len(samples) < 20:
-        raise SystemExit(f"found only {len(samples)} samples in {arguments.data}, capture more with the Studio plugin first")
+    frames = find_gameplay(arguments.gameplay)
+    if len(samples) + len(frames) < 20:
+        raise SystemExit(f"found only {len(samples) + len(frames)} samples, capture more first")
     random.Random(7).shuffle(samples)
-    split = max(1, len(samples) // 10)
-    train_set = RobloxDepth(samples[split:], augment=True)
-    validation_set = RobloxDepth(samples[:split], augment=False)
-    print(f"training on {len(train_set)} samples, validating on {len(validation_set)}")
+    random.Random(7).shuffle(frames)
+    sample_split = min(len(samples), max(1, len(samples) // 10))
+    frame_split = min(len(frames), max(1, len(frames) // 10))
+    train_set = ConcatDataset([RobloxDepth(samples[sample_split:], augment=True), GameplayDepth(frames[frame_split:], augment=True)])
+    validation_set = ConcatDataset([RobloxDepth(samples[:sample_split], augment=False), GameplayDepth(frames[:frame_split], augment=False)])
+    print(f"training on {len(samples) - sample_split} Studio samples and {len(frames) - frame_split} gameplay frames, "
+          f"validating on {sample_split} and {frame_split}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = VARIANTS[arguments.variant](pretrained=arguments.resume is None).to(device)
