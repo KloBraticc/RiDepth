@@ -18,6 +18,7 @@ local MAX_FOV = 85
 local CLEARANCE = 1.5
 local PAUSED_STATUS = 409
 local PAUSE_RETRY_SECONDS = 1
+local MAX_MISSES = 20
 
 local toolbar = plugin:CreateToolbar("RiDepth")
 local button = toolbar:CreateButton("Capture", "Capture depth training samples from this place", "rbxasset://textures/ui/GuiImagePlaceholder.png")
@@ -91,6 +92,28 @@ local function collectScene()
 	return params, minimum, maximum
 end
 
+local probe = Instance.new("Part")
+probe.Name = "RiDepthProbe"
+probe.Shape = Enum.PartType.Ball
+probe.Size = Vector3.one * CLEARANCE * 2
+probe.Anchored = true
+probe.CanCollide = false
+probe.CanQuery = false
+probe.CanTouch = false
+probe.Transparency = 1
+probe.Archivable = false
+
+local function isClear(origin, params)
+	local overlap = OverlapParams.new()
+	overlap.FilterType = Enum.RaycastFilterType.Exclude
+	overlap.FilterDescendantsInstances = params.FilterDescendantsInstances
+	probe.CFrame = CFrame.new(origin)
+	probe.Parent = workspace.CurrentCamera
+	local touching = workspace:GetPartsInPart(probe, overlap)
+	probe.Parent = nil
+	return #touching == 0
+end
+
 local function pickPose(params, minimum, maximum)
 	for _ = 1, 50 do
 		local x = random:NextNumber(minimum.X, maximum.X)
@@ -100,10 +123,7 @@ local function pickPose(params, minimum, maximum)
 		if ground then
 			local height = MIN_HEIGHT + (MAX_HEIGHT - MIN_HEIGHT) * random:NextNumber() ^ 2
 			local origin = ground.Position + Vector3.new(0, height, 0)
-			local overlap = OverlapParams.new()
-			overlap.FilterType = Enum.RaycastFilterType.Exclude
-			overlap.FilterDescendantsInstances = params.FilterDescendantsInstances
-			if #workspace:GetPartBoundsInRadius(origin, CLEARANCE, overlap) == 0 then
+			if isClear(origin, params) then
 				local yaw = math.rad(random:NextNumber(0, 360))
 				local pitch = math.rad(random:NextNumber(MIN_PITCH, MAX_PITCH))
 				return CFrame.new(origin) * CFrame.Angles(0, yaw, 0) * CFrame.Angles(pitch, 0, 0)
@@ -164,9 +184,18 @@ local function run()
 	local session = calibration.session
 
 	local captured = 0
+	local misses = 0
+	print("RiDepth is capturing, keep Studio in front and do not touch it until it reaches " .. SAMPLES_PER_RUN)
 	while running and captured < SAMPLES_PER_RUN do
 		local pose = pickPose(params, minimum, maximum)
-		if pose then
+		if not pose then
+			misses += 1
+			if misses >= MAX_MISSES then
+				warn("RiDepth could not find open space to place the camera in this place, try a different place")
+				break
+			end
+		else
+			misses = 0
 			camera.CFrame = pose
 			camera.FieldOfView = random:NextNumber(MIN_FOV, MAX_FOV)
 			task.wait(SETTLE_SECONDS)
@@ -192,7 +221,9 @@ local function run()
 				break
 			end
 			captured += 1
-			print(string.format("RiDepth captured %d of %d", captured, SAMPLES_PER_RUN))
+			if captured % 10 == 0 then
+				print(string.format("RiDepth captured %d of %d", captured, SAMPLES_PER_RUN))
+			end
 		end
 		task.wait()
 	end
