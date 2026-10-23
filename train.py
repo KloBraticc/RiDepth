@@ -75,11 +75,11 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = VARIANTS[arguments.variant](pretrained=arguments.resume is None).to(device)
     if arguments.resume:
-        model.load_state_dict(torch.load(arguments.resume, map_location=device))
+        model.load_state_dict(torch.load(arguments.resume, map_location=device, weights_only=True))
     teacher = None
     if arguments.teacher:
         teacher = RiDepthNet(pretrained=False).to(device)
-        teacher.load_state_dict(torch.load(arguments.teacher, map_location=device))
+        teacher.load_state_dict(torch.load(arguments.teacher, map_location=device, weights_only=True))
         teacher.eval()
         for parameter in teacher.parameters():
             parameter.requires_grad_(False)

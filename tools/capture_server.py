@@ -1,6 +1,7 @@
 import argparse
 import ctypes
 import json
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,10 +15,21 @@ MAGENTA = np.array([255, 0, 255])
 MAGENTA_TOLERANCE = 12
 IMAGE_WIDTH = 640
 STUDIO_TITLE = "Roblox Studio"
+SAFE_NAME = re.compile(r"^[A-Za-z0-9_]{1,128}$")
+MAX_BODY_BYTES = 64 * 1024 * 1024
+MAX_GRID_PIXELS = 1920 * 1080
+MAX_PENDING_FRAMES = 8
 
 
 class Paused(Exception):
     pass
+
+
+def safe_name(value):
+    text = str(value)
+    if not SAFE_NAME.match(text):
+        raise ValueError("sample names may only use letters, digits and underscores")
+    return text
 
 
 def foreground_title():
@@ -63,7 +75,7 @@ class Capture:
             "width": int(columns[-1] - columns[0] + 1),
             "height": int(rows[-1] - rows[0] + 1),
         }
-        place = str(payload.get("place", 0))
+        place = safe_name(int(payload.get("place", 0)))
         self.session = f"{place}_{int(time.time())}"
         (self.root / self.session).mkdir(parents=True, exist_ok=True)
         print(f"calibrated viewport {self.rect} for session {self.session}")
@@ -75,17 +87,21 @@ class Capture:
         require_studio()
         image = self.grab(self.rect)
         with self.lock:
-            self.frames[payload["id"]] = image
+            self.frames[safe_name(payload["id"])] = image
+            while len(self.frames) > MAX_PENDING_FRAMES:
+                self.frames.pop(next(iter(self.frames)))
         return {"ok": True}
 
     def depth(self, payload):
-        sample = payload["id"]
+        sample = safe_name(payload["id"])
         with self.lock:
             image = self.frames.pop(sample, None)
         if image is None:
             raise ValueError(f"no frame was captured for {sample}")
         width = int(payload["width"])
         height = int(payload["height"])
+        if width <= 0 or height <= 0 or width * height > MAX_GRID_PIXELS:
+            raise ValueError("the depth grid size is out of range")
         depth = np.asarray(payload["depth"], dtype=np.float32).reshape(height, width) / 100.0
         normal = np.stack(
             [np.asarray(payload[key], dtype=np.float32).reshape(height, width) / 1000.0 for key in ("nx", "ny", "nz")]
@@ -112,6 +128,9 @@ def make_handler(capture: Capture):
                 self.send_error(404)
                 return
             length = int(self.headers.get("Content-Length", 0))
+            if length <= 0 or length > MAX_BODY_BYTES:
+                self.send_error(413)
+                return
             try:
                 result = route(json.loads(self.rfile.read(length)))
                 body = json.dumps(result).encode()
