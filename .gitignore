@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+data/
+runs/
+exports/
+*.onnx
+*.onnx_data
+*.pt
