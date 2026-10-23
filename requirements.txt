@@ -6,3 +6,4 @@ mss>=9.0
 onnx>=1.16
 onnxruntime>=1.18
 onnxconverter-common>=1.14
+onnxscript>=0.1

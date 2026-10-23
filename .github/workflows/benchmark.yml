@@ -1,0 +1,54 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ridepth/**"
+      - "export.py"
+      - "tools/benchmark.py"
+      - "tools/render_benchmark.py"
+      - ".github/workflows/benchmark.yml"
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: benchmark
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install numpy pillow onnx onnxscript onnxruntime onnxconverter-common
+
+      - name: Run benchmark and render the chart
+        run: python -m tools.render_benchmark --provider CPUExecutionProvider --precision fp32 --device "a GitHub Actions Windows runner CPU"
+
+      - name: Commit updated chart
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/benchmark-dark.svg assets/benchmark-light.svg assets/benchmark.json
+          if git diff --cached --quiet; then
+            echo "Benchmark chart unchanged"
+          else
+            git commit -m "chore: update live benchmark chart"
+            git push
+          fi

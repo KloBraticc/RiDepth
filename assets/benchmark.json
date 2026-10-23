@@ -1,0 +1,35 @@
+{
+  "meta": {
+    "date": "2026-10-23",
+    "device": "a Windows desktop CPU",
+    "runtime": "1.24.4",
+    "precision": "full precision",
+    "runs": 40
+  },
+  "results": [
+    {
+      "name": "Depth Anything V2 Small",
+      "megabytes": 94.5,
+      "milliseconds": {
+        "266": 48.607,
+        "518": 194.544
+      }
+    },
+    {
+      "name": "RiDepth",
+      "megabytes": 13.9,
+      "milliseconds": {
+        "266": 14.767,
+        "518": 58.412
+      }
+    },
+    {
+      "name": "RiDepth Tiny",
+      "megabytes": 3.7,
+      "milliseconds": {
+        "266": 2.923,
+        "518": 7.957
+      }
+    }
+  ]
+}

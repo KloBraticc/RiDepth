@@ -22,24 +22,17 @@ class Exported(torch.nn.Module):
         return disparity, normals
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--weights", type=Path)
-    parser.add_argument("--variant", choices=sorted(VARIANTS), default="base")
-    parser.add_argument("--output", type=Path, default=Path("exports/ridepth.onnx"))
-    parser.add_argument("--fp16", action="store_true")
-    arguments = parser.parse_args()
-
-    model = VARIANTS[arguments.variant](pretrained=arguments.weights is None)
-    if arguments.weights:
-        model.load_state_dict(torch.load(arguments.weights, map_location="cpu"))
+def export_model(variant: str, weights: Path | None, output: Path, fp16: bool, pretrained: bool = True) -> Path:
+    model = VARIANTS[variant](pretrained=pretrained and weights is None)
+    if weights:
+        model.load_state_dict(torch.load(weights, map_location="cpu", weights_only=True))
     model.eval()
-    arguments.output.parent.mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
     sample = torch.randn(1, 3, *CHECK_SIZES[0])
     torch.onnx.export(
         Exported(model),
         (sample,),
-        arguments.output,
+        output,
         input_names=["pixel_values"],
         output_names=["predicted_depth", "normals"],
         dynamic_axes={
@@ -50,18 +43,29 @@ def main():
         opset_version=17,
         dynamo=False,
     )
-    if arguments.fp16:
-        converted = float16.convert_float_to_float16(onnx.load(arguments.output), keep_io_types=False)
-        onnx.save(converted, arguments.output)
+    if fp16:
+        converted = float16.convert_float_to_float16(onnx.load(output), keep_io_types=False)
+        onnx.save(converted, output)
 
-    session = onnxruntime.InferenceSession(str(arguments.output), providers=["CPUExecutionProvider"])
-    dtype = np.float16 if arguments.fp16 else np.float32
+    session = onnxruntime.InferenceSession(str(output), providers=["CPUExecutionProvider"])
+    dtype = np.float16 if fp16 else np.float32
     for height, width in CHECK_SIZES:
         outputs = session.run(None, {"pixel_values": np.random.randn(1, 3, height, width).astype(dtype)})
         if outputs[0].shape != (1, height, width) or outputs[1].shape != (1, 3, height, width):
             raise SystemExit(f"unexpected output shapes {[o.shape for o in outputs]} for input {height}x{width}")
         print(f"checked {height}x{width}: depth {outputs[0].shape}, normals {outputs[1].shape}")
-    print(f"exported {arguments.output.resolve()}")
+    return output
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--weights", type=Path)
+    parser.add_argument("--variant", choices=sorted(VARIANTS), default="base")
+    parser.add_argument("--output", type=Path, default=Path("exports/ridepth.onnx"))
+    parser.add_argument("--fp16", action="store_true")
+    arguments = parser.parse_args()
+    exported = export_model(arguments.variant, arguments.weights, arguments.output, arguments.fp16)
+    print(f"exported {exported.resolve()}")
 
 
 if __name__ == "__main__":
