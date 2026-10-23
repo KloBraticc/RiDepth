@@ -1,4 +1,5 @@
 import argparse
+import ctypes
 import json
 import threading
 import time
@@ -12,6 +13,25 @@ from PIL import Image
 MAGENTA = np.array([255, 0, 255])
 MAGENTA_TOLERANCE = 12
 IMAGE_WIDTH = 640
+STUDIO_TITLE = "Roblox Studio"
+
+
+class Paused(Exception):
+    pass
+
+
+def foreground_title():
+    user32 = ctypes.windll.user32
+    window = user32.GetForegroundWindow()
+    length = user32.GetWindowTextLengthW(window)
+    buffer = ctypes.create_unicode_buffer(length + 1)
+    user32.GetWindowTextW(window, buffer, length + 1)
+    return buffer.value
+
+
+def require_studio():
+    if STUDIO_TITLE not in foreground_title():
+        raise Paused("Roblox Studio is not the active window, capture is paused")
 
 
 class Capture:
@@ -23,12 +43,13 @@ class Capture:
         self.lock = threading.Lock()
 
     def grab(self, region):
-        with mss.mss() as screen:
+        with mss.MSS() as screen:
             shot = screen.grab(region)
         return np.asarray(shot)[:, :, 2::-1]
 
     def calibrate(self, payload):
-        with mss.mss() as screen:
+        require_studio()
+        with mss.MSS() as screen:
             monitor = screen.monitors[0]
             shot = np.asarray(screen.grab(monitor))[:, :, 2::-1].astype(np.int16)
         mask = np.all(np.abs(shot - MAGENTA) <= MAGENTA_TOLERANCE, axis=2)
@@ -51,6 +72,7 @@ class Capture:
     def frame(self, payload):
         if self.rect is None:
             raise ValueError("calibrate before capturing frames")
+        require_studio()
         image = self.grab(self.rect)
         with self.lock:
             self.frames[payload["id"]] = image
@@ -94,6 +116,9 @@ def make_handler(capture: Capture):
                 result = route(json.loads(self.rfile.read(length)))
                 body = json.dumps(result).encode()
                 self.send_response(200)
+            except Paused as error:
+                body = json.dumps({"error": str(error)}).encode()
+                self.send_response(409)
             except Exception as error:
                 body = json.dumps({"error": str(error)}).encode()
                 self.send_response(500)

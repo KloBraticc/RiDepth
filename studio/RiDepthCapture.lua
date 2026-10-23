@@ -1,6 +1,7 @@
 local HttpService = game:GetService("HttpService")
 local Selection = game:GetService("Selection")
 local CoreGui = game:GetService("CoreGui")
+local StarterGui = game:GetService("StarterGui")
 
 local SERVER = "http://127.0.0.1:8765"
 local GRID_WIDTH = 320
@@ -15,6 +16,8 @@ local MAX_PITCH = 12
 local MIN_FOV = 55
 local MAX_FOV = 85
 local CLEARANCE = 1.5
+local PAUSED_STATUS = 409
+local PAUSE_RETRY_SECONDS = 1
 
 local toolbar = plugin:CreateToolbar("RiDepth")
 local button = toolbar:CreateButton("Capture", "Capture depth training samples from this place", "rbxasset://textures/ui/GuiImagePlaceholder.png")
@@ -24,16 +27,27 @@ local running = false
 local random = Random.new()
 
 local function post(path, body)
-	local response = HttpService:RequestAsync({
-		Url = SERVER .. path,
-		Method = "POST",
-		Headers = { ["Content-Type"] = "application/json" },
-		Body = HttpService:JSONEncode(body),
-	})
-	if not response.Success then
-		error(path .. " returned " .. response.StatusCode .. ": " .. response.Body)
+	local encoded = HttpService:JSONEncode(body)
+	local warned = false
+	while true do
+		local response = HttpService:RequestAsync({
+			Url = SERVER .. path,
+			Method = "POST",
+			Headers = { ["Content-Type"] = "application/json" },
+			Body = encoded,
+		})
+		if response.Success then
+			return HttpService:JSONDecode(response.Body)
+		end
+		if response.StatusCode ~= PAUSED_STATUS or not running then
+			error(path .. " returned " .. response.StatusCode .. ": " .. response.Body)
+		end
+		if not warned then
+			warn("RiDepth paused: keep Roblox Studio as the active window and do not cover it")
+			warned = true
+		end
+		task.wait(PAUSE_RETRY_SECONDS)
 	end
-	return HttpService:JSONDecode(response.Body)
 end
 
 local function showOverlay(color)
@@ -131,6 +145,8 @@ local function run()
 	local camera = workspace.CurrentCamera
 	local original = camera.CFrame
 	local originalFov = camera.FieldOfView
+	local originalGui = StarterGui.ShowDevelopmentGui
+	StarterGui.ShowDevelopmentGui = false
 	Selection:Set({})
 	local params, minimum, maximum = collectScene()
 
@@ -140,6 +156,9 @@ local function run()
 	overlay:Destroy()
 	if not ok then
 		warn("RiDepth calibration failed: " .. tostring(calibration))
+		StarterGui.ShowDevelopmentGui = originalGui
+		running = false
+		button:SetActive(false)
 		return
 	end
 	local session = calibration.session
@@ -180,6 +199,7 @@ local function run()
 
 	camera.CFrame = original
 	camera.FieldOfView = originalFov
+	StarterGui.ShowDevelopmentGui = originalGui
 	running = false
 	button:SetActive(false)
 	print("RiDepth capture finished with " .. captured .. " samples")
