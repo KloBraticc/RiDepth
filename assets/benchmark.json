@@ -11,24 +11,24 @@
       "name": "Depth Anything V2 Small",
       "megabytes": 94.5,
       "milliseconds": {
-        "266": 98.928,
-        "518": 404.947
+        "266": 41.688,
+        "518": 170.47
       }
     },
     {
       "name": "RiDepth",
       "megabytes": 13.9,
       "milliseconds": {
-        "266": 30.656,
-        "518": 121.172
+        "266": 13.043,
+        "518": 45.813
       }
     },
     {
       "name": "RiDepth Tiny",
       "megabytes": 3.7,
       "milliseconds": {
-        "266": 7.076,
-        "518": 15.613
+        "266": 2.632,
+        "518": 9.045
       }
     }
   ]
