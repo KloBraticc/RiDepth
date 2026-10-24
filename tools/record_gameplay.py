@@ -8,7 +8,7 @@ import mss
 import numpy as np
 from PIL import Image
 
-WINDOW_TITLE = "Roblox"
+WINDOW_CLASS = "WINDOWSCLIENT"
 IMAGE_WIDTH = 640
 PROBE_SIZE = (64, 36)
 
@@ -22,8 +22,9 @@ def make_dpi_aware():
 
 def roblox_client_rect():
     user32 = ctypes.windll.user32
-    window = user32.FindWindowW(None, WINDOW_TITLE)
-    if not window or user32.GetForegroundWindow() != window or user32.IsIconic(window):
+    window = user32.GetForegroundWindow()
+    name = ctypes.create_unicode_buffer(64)
+    if not window or not user32.GetClassNameW(window, name, 64) or name.value != WINDOW_CLASS or user32.IsIconic(window):
         return None
     rect = ctypes.wintypes.RECT()
     user32.GetClientRect(window, ctypes.byref(rect))
@@ -38,11 +39,15 @@ def probe(image: Image.Image):
     return np.asarray(image.resize(PROBE_SIZE, Image.Resampling.BILINEAR), dtype=np.float32) / 255.0
 
 
+def relative_change(current, previous):
+    return np.abs(current - previous).mean() / ((current.mean() + previous.mean()) / 2 + 0.05)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path("gameplay"))
     parser.add_argument("--interval", type=float, default=1.0)
-    parser.add_argument("--change", type=float, default=0.04)
+    parser.add_argument("--change", type=float, default=0.08)
     parser.add_argument("--limit", type=int, default=20000)
     arguments = parser.parse_args()
     make_dpi_aware()
@@ -60,7 +65,7 @@ def main():
                 image = Image.fromarray(shot)
                 current = probe(image)
                 brightness = current.mean()
-                if 0.03 < brightness < 0.97 and (previous is None or np.abs(current - previous).mean() > arguments.change):
+                if 0.03 < brightness < 0.97 and (previous is None or relative_change(current, previous) > arguments.change):
                     height = round(IMAGE_WIDTH * image.height / image.width)
                     image.resize((IMAGE_WIDTH, height), Image.Resampling.LANCZOS).save(session / f"{saved:06d}.png")
                     previous = current
