@@ -105,4 +105,39 @@ class RiDepthTiny(nn.Module):
         return disparity, normals
 
 
-VARIANTS = {"base": RiDepthNet, "tiny": RiDepthTiny}
+LARGE_REPOSITORY = "depth-anything/Depth-Anything-V2-Small-hf"
+LARGE_REVISION = "5426e4f0f36572d16453bbda7a8389317b1bef99"
+
+
+class RiDepthLarge(nn.Module):
+    def __init__(self, pretrained: bool = True):
+        super().__init__()
+        from transformers import AutoConfig, DepthAnythingForDepthEstimation
+
+        if pretrained:
+            self.net = DepthAnythingForDepthEstimation.from_pretrained(LARGE_REPOSITORY, revision=LARGE_REVISION)
+        else:
+            self.net = DepthAnythingForDepthEstimation(AutoConfig.from_pretrained(LARGE_REPOSITORY, revision=LARGE_REVISION))
+        features = self.net.config.fusion_hidden_size
+        self.normal_head = nn.Sequential(Light(features, features), nn.Conv2d(features, 3, 3, padding=1))
+
+    def forward(self, x):
+        size = x.shape[-2:]
+        patch = self.net.config.patch_size
+        rows, columns = size[0] // patch, size[1] // patch
+        features = self.net.backbone.forward_with_filtered_kwargs(x).feature_maps
+        fused = self.net.neck(features, rows, columns)
+        head = self.net.head
+        disparity = F.interpolate(head.conv1(fused[head.head_in_index]), size=size, mode="bilinear", align_corners=True)
+        disparity = head.activation2(head.conv3(head.activation1(head.conv2(disparity))))[:, 0] * head.max_depth
+        normals = F.interpolate(self.normal_head(fused[-1]), size=size, mode="bilinear", align_corners=False)
+        return disparity, F.normalize(normals, dim=1)
+
+    def parameter_groups(self, learning_rate: float):
+        backbone = list(self.net.backbone.parameters())
+        known = {id(parameter) for parameter in backbone}
+        rest = [parameter for parameter in self.parameters() if id(parameter) not in known]
+        return [{"params": backbone, "lr": learning_rate * 0.1}, {"params": rest, "lr": learning_rate}]
+
+
+VARIANTS = {"base": RiDepthNet, "tiny": RiDepthTiny, "large": RiDepthLarge}

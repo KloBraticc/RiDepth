@@ -7,7 +7,7 @@ from torch.utils.data import ConcatDataset, DataLoader, WeightedRandomSampler
 
 from ridepth.data import GameplayDepth, RobloxDepth, find_gameplay, find_samples, split_gameplay
 from ridepth.losses import align_scale, depth_losses, normalize_target
-from ridepth.model import VARIANTS, RiDepthNet
+from ridepth.model import VARIANTS
 
 WEIGHTS = {"depth": 1.0, "gradient": 0.5, "normal": 0.5, "sky": 0.5, "teacher_depth": 0.5, "teacher_normal": 0.25}
 SCORED = ("depth", "gradient", "normal")
@@ -64,6 +64,8 @@ def main():
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--variant", choices=sorted(VARIANTS), default="base")
     parser.add_argument("--teacher", type=Path)
+    parser.add_argument("--teacher-variant", choices=sorted(VARIANTS), default="base")
+    parser.add_argument("--size", type=int, nargs=2, default=[294, 518], metavar=("HEIGHT", "WIDTH"))
     parser.add_argument("--studio-share", type=float, default=0.25)
     arguments = parser.parse_args()
 
@@ -74,10 +76,11 @@ def main():
     random.Random(7).shuffle(samples)
     sample_split = min(len(samples), max(1, len(samples) // 10))
     train_frames, held_frames = split_gameplay(frames)
-    studio_train = RobloxDepth(samples[sample_split:], augment=True)
-    gameplay_train = GameplayDepth(train_frames, augment=True)
+    size = tuple(arguments.size)
+    studio_train = RobloxDepth(samples[sample_split:], size=size, augment=True)
+    gameplay_train = GameplayDepth(train_frames, size=size, augment=True)
     train_set = ConcatDataset([studio_train, gameplay_train])
-    validation_set = ConcatDataset([RobloxDepth(samples[:sample_split], augment=False), GameplayDepth(held_frames, augment=False)])
+    validation_set = ConcatDataset([RobloxDepth(samples[:sample_split], size=size, augment=False), GameplayDepth(held_frames, size=size, augment=False)])
     held_games = sorted({frame.parent.parent.name for frame in held_frames})
     print(f"training on {len(studio_train)} Studio samples and {len(gameplay_train)} gameplay frames, "
           f"validating on {sample_split} Studio samples and {len(held_frames)} frames from unseen games {held_games}")
@@ -88,12 +91,13 @@ def main():
         model.load_state_dict(torch.load(arguments.resume, map_location=device, weights_only=True))
     teacher = None
     if arguments.teacher:
-        teacher = RiDepthNet(pretrained=False).to(device)
+        teacher = VARIANTS[arguments.teacher_variant](pretrained=False).to(device)
         teacher.load_state_dict(torch.load(arguments.teacher, map_location=device, weights_only=True))
         teacher.eval()
         for parameter in teacher.parameters():
             parameter.requires_grad_(False)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=arguments.learning_rate, weight_decay=1e-4)
+    parameters = model.parameter_groups(arguments.learning_rate) if hasattr(model, "parameter_groups") else model.parameters()
+    optimizer = torch.optim.AdamW(parameters, lr=arguments.learning_rate, weight_decay=1e-4)
     schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, arguments.epochs)
     scaler = torch.amp.GradScaler(enabled=device.type == "cuda")
 

@@ -2,10 +2,8 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-import onnx
 import onnxruntime
 import torch
-from onnxconverter_common import float16
 
 from ridepth.model import VARIANTS
 
@@ -26,9 +24,12 @@ def export_model(variant: str, weights: Path | None, output: Path, fp16: bool, p
     model = VARIANTS[variant](pretrained=pretrained and weights is None)
     if weights:
         model.load_state_dict(torch.load(weights, map_location="cpu", weights_only=True))
-    model.eval()
+    device = torch.device("cuda" if fp16 and torch.cuda.is_available() else "cpu")
+    model = model.to(device).eval()
+    sample = torch.randn(1, 3, *CHECK_SIZES[0], device=device)
+    if fp16:
+        model, sample = model.half(), sample.half()
     output.parent.mkdir(parents=True, exist_ok=True)
-    sample = torch.randn(1, 3, *CHECK_SIZES[0])
     torch.onnx.export(
         Exported(model),
         (sample,),
@@ -43,10 +44,6 @@ def export_model(variant: str, weights: Path | None, output: Path, fp16: bool, p
         opset_version=17,
         dynamo=False,
     )
-    if fp16:
-        converted = float16.convert_float_to_float16(onnx.load(output), keep_io_types=False)
-        onnx.save(converted, output)
-
     session = onnxruntime.InferenceSession(str(output), providers=["CPUExecutionProvider"])
     dtype = np.float16 if fp16 else np.float32
     for height, width in CHECK_SIZES:

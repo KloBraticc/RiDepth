@@ -54,7 +54,7 @@ def recolor(image):
 
 
 class RobloxDepth(Dataset):
-    def __init__(self, samples, size=(256, 448), augment=True):
+    def __init__(self, samples, size=(294, 518), augment=True):
         self.samples = list(samples)
         self.size = size
         self.augment = augment
@@ -85,7 +85,7 @@ class RobloxDepth(Dataset):
 
 
 class GameplayDepth(Dataset):
-    def __init__(self, frames, size=(256, 448), augment=True):
+    def __init__(self, frames, size=(294, 518), augment=True):
         self.frames = list(frames)
         self.size = size
         self.augment = augment

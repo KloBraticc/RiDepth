@@ -1,7 +1,7 @@
 <h1 align="center"><b>RiDepth</b></h1>
 
 <p align="center">
-  A tiny depth model made for Roblox, trained on exact depth from Roblox Studio.
+  A depth model made for Roblox, trained on exact depth from Roblox Studio and on real gameplay.
 </p>
 
 <p align="center">
@@ -34,9 +34,9 @@
 ---
 
 > [!NOTE]
-> RiDepth is the depth model behind RiShade in [Voidstrap](https://github.com/KloBraticc/Voidstrap). General depth models are trained on photos, so on Roblox they blur edges, put the sky at the wrong distance and leave ghosts in reflections. RiDepth only ever sees Roblox, and it learns from depth that Studio measures exactly, not from guesses.
+> RiDepth is the depth model behind RiShade in [Voidstrap](https://github.com/KloBraticc/Voidstrap). General depth models are trained on photos, so on Roblox they blur edges, put the sky at the wrong distance and leave ghosts in reflections. RiDepth Large starts from Depth Anything V2 Small and is fine tuned on Roblox only, with depth that Studio measures exactly and frames from real games.
 
-The chart above is rebuilt by GitHub Actions from a fresh benchmark run, so the numbers are always real. It runs on a plain CPU runner, where everything is much slower than on a GPU. On an RTX 3060 Ti through DirectML, RiDepth Tiny takes about 0.7 ms per frame at 266 px and 1 ms at 518 px.
+The chart above is rebuilt by GitHub Actions from a fresh benchmark run, so the numbers are always real. It runs on a plain CPU runner, where everything is much slower than on a GPU. On an RTX 3060 Ti through DirectML, RiDepth Large takes about 2.4 ms per frame at 266 px, 4 ms at 392 px and 8 ms at 518 px.
 
 ## Features
 
@@ -44,10 +44,10 @@ The chart above is rebuilt by GitHub Actions from a fresh benchmark run, so the 
 - **Real gameplay**: frames recorded in many games are labelled by Depth Anything V2 Large, with the game's interface masked out
 - **Two outputs**: depth for every effect, and surface normals that reflections can use directly instead of guessing them from depth
 - **Sky at the far plane**: open sky is learned as infinitely far, so reflections never smear into it
-- **Tiny and fast**: RiDepth Tiny is under 1 million parameters and about 2 MB in half precision
-- **Distillation**: Tiny learns from the larger RiDepth model as well as from the true depth, so it keeps most of the quality
+- **RiDepth Large**: Depth Anything V2 Small (24.8 million parameters, Apache 2.0) fine tuned on Roblox, about 48 MB in half precision, with a full precision copy for GPUs that lack half precision
+- **Smaller variants**: `base` and `tiny` stay available for experiments and can learn from Large by distillation
 - **Drop in ONNX**: the export matches what RiShade loads, with dynamic width and height
-- **Runs on any DirectX 12 GPU** through DirectML in RiShade, NVIDIA, AMD and Intel alike
+- **Runs on any DirectX 12 GPU** through DirectML in RiShade, NVIDIA, AMD and Intel alike. RiShade runs it on the GPU the game uses, picks the full precision copy where half precision is missing, lowers the depth size on slower GPUs and falls back to its built in estimate when even the smallest size is too slow
 - **Live benchmark** against Depth Anything V2 Small, refreshed by a scheduled workflow
 
 ## Usage
@@ -92,24 +92,26 @@ Training needs an NVIDIA GPU. Install the CUDA build of PyTorch first:
 .venv\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 ```
 
-Train the full model, then the tiny one with the full model as its teacher:
+Fine tune RiDepth Large. A smaller variant can learn from it afterwards:
 
 ```bash
-.venv\Scripts\python train.py
-.venv\Scripts\python train.py --variant tiny --teacher runs\best.pt --runs runs\tiny --epochs 80 --batch 16
+.venv\Scripts\python train.py --variant large --runs runs\large --epochs 20 --batch 8 --learning-rate 5e-5
+.venv\Scripts\python train.py --variant tiny --teacher runs\large\best.pt --teacher-variant large --runs runs\tiny --epochs 80 --batch 16
 ```
 
 | Option | What it does |
 | --- | --- |
-| `--variant` | `base` or `tiny` |
-| `--teacher` | Weights of a trained `base` model to learn from |
+| `--variant` | `large`, `base` or `tiny` |
+| `--teacher` | Weights of a trained model to learn from |
+| `--teacher-variant` | Variant of the teacher, `base` by default |
+| `--size` | Training height and width, 294 518 by default. Large needs multiples of 14 |
 | `--epochs` | Passes over the data, 60 by default |
 | `--batch` | Images per step, lower it if the GPU runs out of memory |
 | `--resume` | Continue from saved weights |
 | `--gameplay` | Folder of labelled gameplay frames, `gameplay` by default |
 | `--studio-share` | Share of each epoch drawn from Studio samples, 0.25 by default |
 
-The best weights are kept in `runs\best.pt`. More detail is in [docs/training.md](docs/training.md).
+The best weights are kept in `best.pt` inside the runs folder. More detail is in [docs/training.md](docs/training.md).
 
 </details>
 
@@ -117,10 +119,11 @@ The best weights are kept in `runs\best.pt`. More detail is in [docs/training.md
   <summary><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/export-dark.svg"><img src="assets/readme/export-light.svg" alt="Exporting for RiShade" width="82%" height="40" align="left"></picture><picture><img src="assets/readme/spacer.svg" alt="" width="1" height="40" align="middle"></picture></summary>
 
 ```bash
-.venv\Scripts\python export.py --variant tiny --weights runs\tiny\best.pt --output exports\ridepth-tiny.onnx --fp16
+.venv\Scripts\python export.py --variant large --weights runs\large\best.pt --output exports\ridepth-large.onnx --fp16
+.venv\Scripts\python export.py --variant large --weights runs\large\best.pt --output exports\ridepth-large-fp32.onnx
 ```
 
-The exporter checks the model at 266 and 518 pixels before it finishes.
+The exporter checks the model at 266 and 518 pixels before it finishes. Publish both files in a release tagged `large-` and a number, and RiShade picks up the newest one on its own.
 
 | | |
 | --- | --- |
@@ -139,7 +142,7 @@ Time any ONNX depth model on your own GPU through DirectML, the same way RiShade
 
 ```bash
 .venv\Scripts\python -m pip install onnxruntime-directml
-.venv\Scripts\python tools\benchmark.py exports\ridepth-tiny.onnx --sizes 266 392 518
+.venv\Scripts\python tools\benchmark.py exports\ridepth-large.onnx --sizes 266 392 518
 ```
 
 Rebuild the README chart locally:
@@ -159,7 +162,7 @@ Model speed does not depend on trained weights, so the chart uses freshly built 
 | --- | --- |
 | `studio/RiDepthCapture.lua` | Studio plugin that moves the camera and ray traces depth and normals |
 | `tools/capture_server.py` | Local server on `127.0.0.1:8765` that takes the screenshots and saves samples |
-| `ridepth/model.py` | `RiDepthNet` (MobileNetV3 Large) and `RiDepthTiny` (MobileNetV3 Small) |
+| `ridepth/model.py` | `RiDepthLarge` (Depth Anything V2 Small with a normals head), `RiDepthNet` (MobileNetV3 Large) and `RiDepthTiny` (MobileNetV3 Small) |
 | `ridepth/losses.py` | Scale invariant depth, gradient and normal losses |
 | `train.py` | Training with optional distillation |
 | `export.py` | ONNX export with shape checks |
@@ -179,7 +182,7 @@ Model speed does not depend on trained weights, so the chart uses freshly built 
 
 [![License][shield-license]][link-license]
 
-RiDepth is released under the [MIT License](LICENSE). The encoders start from torchvision's ImageNet MobileNetV3 weights (BSD 3 Clause). The benchmark downloads Depth Anything V2 Small (Apache 2.0) from Hugging Face to compare against, and the gameplay labeller downloads Depth Anything V2 Large (CC BY NC 4.0) as its teacher. Neither is included in this repository. The Windows icon is from [Voidstrap](https://github.com/KloBraticc/Voidstrap).
+RiDepth is released under the [MIT License](LICENSE). RiDepth Large starts from Depth Anything V2 Small (Apache 2.0), downloaded from Hugging Face at a pinned revision. The smaller encoders start from torchvision's ImageNet MobileNetV3 weights (BSD 3 Clause). The benchmark downloads Depth Anything V2 Small (Apache 2.0) from Hugging Face to compare against, and the gameplay labeller downloads Depth Anything V2 Large (CC BY NC 4.0) as its teacher. Neither is included in this repository. The Windows icon is from [Voidstrap](https://github.com/KloBraticc/Voidstrap).
 
 [shield-license]:      https://img.shields.io/github/license/KloBraticc/RiDepth?style=for-the-badge
 [shield-license-flat]: https://img.shields.io/github/license/KloBraticc/RiDepth?style=flat&color=4c1

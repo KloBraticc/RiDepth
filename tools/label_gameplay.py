@@ -11,7 +11,6 @@ from PIL import Image
 TEACHER_URL = "https://huggingface.co/onnx-community/depth-anything-v2-large/resolve/1fa1591c7b080e98da9655827c3a33a3972a4a83/onnx/model_fp16.onnx"
 TEACHER_SHA256 = "8eefc7afb877b10d413c8e1024b012073c6e4f62735d39555b1083fee3aabf0a"
 TEACHER_SIZE = (518, 294)
-LABEL_SIZE = (320, 180)
 STATIC_SIZE = (160, 90)
 STATIC_TOLERANCE = 6 / 255
 STATIC_SHARE = 0.6
@@ -78,13 +77,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--frames", type=Path, default=Path("gameplay"))
     parser.add_argument("--cache", type=Path, default=Path(tempfile.gettempdir()) / "ridepth-teacher")
+    parser.add_argument("--relabel", action="store_true")
     arguments = parser.parse_args()
     sessions = sorted({path.parent for path in arguments.frames.rglob("*.png")})
     for session in sessions:
         share = mark_static(session)
         if share is not None:
             print(f"{session.relative_to(arguments.frames)}: {share * 100:.1f} percent static interface")
-    frames = sorted(path for path in arguments.frames.rglob("*.png") if path.name != "static.png" and not path.with_suffix(".teacher.npy").exists())
+    frames = sorted(path for path in arguments.frames.rglob("*.png") if path.name != "static.png" and (arguments.relabel or not path.with_suffix(".teacher.npy").exists()))
     if not frames:
         print("every frame is already labelled")
         return
@@ -100,8 +100,7 @@ def main():
         image = Image.open(frame).convert("RGB").resize(TEACHER_SIZE, Image.Resampling.BICUBIC)
         pixels = (np.asarray(image, dtype=np.float32).transpose(2, 0, 1) / 255.0 - MEAN) / STD
         disparity = session.run(None, {source.name: pixels[None].astype(dtype)})[0].reshape(height, width).astype(np.float32)
-        label = Image.fromarray(disparity).resize(LABEL_SIZE, Image.Resampling.BILINEAR)
-        np.save(frame.with_suffix(".teacher.npy"), np.asarray(label, dtype=np.float16))
+        np.save(frame.with_suffix(".teacher.npy"), disparity.astype(np.float16))
         if index % 100 == 0 or index == len(frames):
             print(f"labelled {index} of {len(frames)}")
 
