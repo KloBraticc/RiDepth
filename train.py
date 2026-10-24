@@ -10,6 +10,7 @@ from ridepth.losses import align_scale, depth_losses, normalize_target
 from ridepth.model import VARIANTS, RiDepthNet
 
 WEIGHTS = {"depth": 1.0, "gradient": 0.5, "normal": 0.5, "sky": 0.5, "teacher_depth": 0.5, "teacher_normal": 0.25}
+SCORED = ("depth", "gradient", "normal")
 
 
 def teacher_losses(disparity, normals, teacher_disparity, teacher_normals):
@@ -109,7 +110,7 @@ def main():
         trained = run_epoch(model, train_loader, device, optimizer, scaler, teacher)
         validated = run_epoch(model, validation_loader, device)
         schedule.step()
-        score = sum(WEIGHTS[name] * value for name, value in validated.items() if not name.startswith("teacher"))
+        score = sum(WEIGHTS[name] * value for name, value in validated.items() if name in SCORED)
         print(f"epoch {epoch}: train {trained} validation {validated}")
         torch.save(model.state_dict(), arguments.runs / "last.pt")
         if score < best:

@@ -19,7 +19,7 @@ Both take any width and height and return depth and normals at the input size.
 
 ## Splits and checkpoints
 
-A fixed 10 percent of the Studio samples and about 15 percent of the recorded games are held back for validation. Whole games are held back, never single frames, because frames from one game look alike and would make the score look better than it is. After every epoch the last weights go to `last.pt`, and whenever the validation score improves they also go to `best.pt`. The score ignores the distillation terms, so it always measures distance from the true depth.
+A fixed 10 percent of the Studio samples and about 15 percent of the recorded games are held back for validation. Whole games are held back, never single frames, because frames from one game look alike and would make the score look better than it is. After every epoch the last weights go to `last.pt`, and whenever the validation score improves they also go to `best.pt`. The score only counts the depth, edge and normal terms. The distillation terms are left out so it always measures distance from the true depth, and the sky term is left out because far dark corners indoors look like sky to the teacher, which makes it too noisy to pick checkpoints by.
 
 ## Augmentation
 
