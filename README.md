@@ -41,6 +41,7 @@ The chart above is rebuilt by GitHub Actions from a fresh benchmark run, so the 
 ## Features
 
 - **Exact training data**: a Studio plugin casts a ray for every pixel, so each sample has true depth and true surface direction
+- **Real gameplay**: frames recorded in many games are labelled by Depth Anything V2 Large, with the game's interface masked out
 - **Two outputs**: depth for every effect, and surface normals that reflections can use directly instead of guessing them from depth
 - **Sky at the far plane**: open sky is learned as infinitely far, so reflections never smear into it
 - **Tiny and fast**: RiDepth Tiny is under 1 million parameters and about 2 MB in half precision
@@ -71,6 +72,13 @@ Copy `studio/RiDepthCapture.lua` into `%LOCALAPPDATA%\Roblox\Plugins`, restart S
 
 Keep Studio in front while it runs. The server pauses on its own when another window covers it, and the plugin hides the place's own UI so it never ends up in the pictures. Capture in many different places, variety matters more than sample count.
 
+To add real games, turn RiShade off, record while you play and label the frames:
+
+```bash
+.venv\Scripts\python tools\record_gameplay.py --output gameplay\<game name>
+.venv\Scripts\python tools\label_gameplay.py
+```
+
 More detail is in [docs/capture.md](docs/capture.md).
 
 </details>
@@ -98,6 +106,8 @@ Train the full model, then the tiny one with the full model as its teacher:
 | `--epochs` | Passes over the data, 60 by default |
 | `--batch` | Images per step, lower it if the GPU runs out of memory |
 | `--resume` | Continue from saved weights |
+| `--gameplay` | Folder of labelled gameplay frames, `gameplay` by default |
+| `--studio-share` | Share of each epoch drawn from Studio samples, 0.25 by default |
 
 The best weights are kept in `runs\best.pt`. More detail is in [docs/training.md](docs/training.md).
 
@@ -153,6 +163,9 @@ Model speed does not depend on trained weights, so the chart uses freshly built 
 | `ridepth/losses.py` | Scale invariant depth, gradient and normal losses |
 | `train.py` | Training with optional distillation |
 | `export.py` | ONNX export with shape checks |
+| `tools/record_gameplay.py` | Saves Roblox frames while you play |
+| `tools/label_gameplay.py` | Labels gameplay frames with Depth Anything V2 Large and masks the interface |
+| `tools/evaluate.py` | Scores checkpoints on Studio and on unseen games |
 | `tools/benchmark.py` | DirectML or CPU timing |
 | `tools/render_benchmark.py` | Builds the chart at the top of this page |
 
@@ -166,7 +179,7 @@ Model speed does not depend on trained weights, so the chart uses freshly built 
 
 [![License][shield-license]][link-license]
 
-RiDepth is released under the [MIT License](LICENSE). The encoders start from torchvision's ImageNet MobileNetV3 weights (BSD 3 Clause). The benchmark downloads Depth Anything V2 Small (Apache 2.0) from Hugging Face to compare against, it is never included in this repository. The Windows icon is from [Voidstrap](https://github.com/KloBraticc/Voidstrap).
+RiDepth is released under the [MIT License](LICENSE). The encoders start from torchvision's ImageNet MobileNetV3 weights (BSD 3 Clause). The benchmark downloads Depth Anything V2 Small (Apache 2.0) from Hugging Face to compare against, and the gameplay labeller downloads Depth Anything V2 Large (CC BY NC 4.0) as its teacher. Neither is included in this repository. The Windows icon is from [Voidstrap](https://github.com/KloBraticc/Voidstrap).
 
 [shield-license]:      https://img.shields.io/github/license/KloBraticc/RiDepth?style=for-the-badge
 [shield-license-flat]: https://img.shields.io/github/license/KloBraticc/RiDepth?style=flat&color=4c1

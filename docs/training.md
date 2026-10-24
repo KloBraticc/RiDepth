@@ -12,17 +12,32 @@ Both take any width and height and return depth and normals at the input size.
 ## Targets and losses
 
 - **Depth** is trained as disparity, one over depth, with sky at 0. Each target is divided by its 95th percentile and the prediction is matched to it with a single best scale, so the model learns shape and order rather than absolute studs. Sky stays at 0 because no offset is allowed.
+- **Gameplay frames** carry relative disparity from the teacher, which has an unknown offset, so the prediction is matched to them with a best scale and offset. The Studio samples keep pinning the sky at 0. Pixels under the interface mask are left out of every term.
 - **Gradient loss** compares edges across four scales, which keeps outlines sharp.
 - **Normal loss** is one minus the cosine between predicted and true surface direction, on solid pixels only.
 - **Distillation** (Tiny only) adds the same depth and normal losses against the teacher's predictions.
 
 ## Splits and checkpoints
 
-A fixed 10 percent of samples is held back for validation. After every epoch the last weights go to `last.pt`, and whenever the validation score improves they also go to `best.pt`. The score ignores the distillation terms, so it always measures distance from the true depth.
+A fixed 10 percent of the Studio samples and about 15 percent of the recorded games are held back for validation. Whole games are held back, never single frames, because frames from one game look alike and would make the score look better than it is. After every epoch the last weights go to `last.pt`, and whenever the validation score improves they also go to `best.pt`. The score ignores the distillation terms, so it always measures distance from the true depth.
 
 ## Augmentation
 
-Horizontal flips (the normal's sideways part is flipped with it) and random brightness, contrast and saturation.
+Horizontal flips (the normal's sideways part is flipped with it) and random brightness, contrast and saturation. Gameplay frames are also cropped to between 60 and 100 percent of their area before resizing.
+
+## Sampling
+
+There are far more gameplay frames than Studio samples, so each batch is drawn with weights that keep Studio at a quarter of the training data by default. Change it with `--studio-share`.
+
+## Evaluating
+
+Compare checkpoints on the held out data, and optionally save previews of the frame, the teacher and every model side by side:
+
+```bash
+.venv\Scripts\python -m tools.evaluate base:runsest.pt tiny:runs	inyest.pt --previews previews
+```
+
+It reports the aligned depth error, the edge error, the share of pixels within 25 percent of the target (`delta1`) and how close the model puts the sky to 0 (`sky`), separately for Studio and for unseen games.
 
 ## Tips
 

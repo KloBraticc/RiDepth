@@ -12,6 +12,11 @@ TEACHER_URL = "https://huggingface.co/onnx-community/depth-anything-v2-large/res
 TEACHER_SHA256 = "8eefc7afb877b10d413c8e1024b012073c6e4f62735d39555b1083fee3aabf0a"
 TEACHER_SIZE = (518, 294)
 LABEL_SIZE = (320, 180)
+STATIC_SIZE = (160, 90)
+STATIC_TOLERANCE = 6 / 255
+STATIC_SHARE = 0.6
+STATIC_EDGE = 0.06
+STATIC_REACH = 4
 MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
 STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
 CHUNK = 1 << 20
@@ -42,14 +47,47 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def mark_static(session: Path):
+    frames = sorted(session.glob("*.png"))
+    frames = [frame for frame in frames if frame.name != "static.png"]
+    if len(frames) < 8:
+        return None
+    stack = np.stack([np.asarray(Image.open(frame).convert("RGB").resize(STATIC_SIZE, Image.Resampling.BILINEAR), dtype=np.float32) / 255.0 for frame in frames])
+    median = np.median(stack, axis=0)
+    matches = (np.abs(stack - median).max(axis=-1) < STATIC_TOLERANCE).mean(axis=0)
+    grey = median.mean(axis=-1)
+    edges = np.zeros_like(grey, dtype=bool)
+    edges[:, 1:] |= np.abs(np.diff(grey, axis=1)) > STATIC_EDGE
+    edges[1:, :] |= np.abs(np.diff(grey, axis=0)) > STATIC_EDGE
+    static = (matches > STATIC_SHARE) & grow(edges, STATIC_REACH)
+    static = grow(static, 1)
+    Image.fromarray((static * 255).astype(np.uint8)).save(session / "static.png")
+    return static.mean()
+
+
+def grow(mask, reach):
+    padded = np.pad(mask, reach)
+    grown = np.zeros_like(mask)
+    for dy in range(2 * reach + 1):
+        for dx in range(2 * reach + 1):
+            grown |= padded[dy:dy + mask.shape[0], dx:dx + mask.shape[1]]
+    return grown
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--frames", type=Path, default=Path("gameplay"))
     parser.add_argument("--cache", type=Path, default=Path(tempfile.gettempdir()) / "ridepth-teacher")
     arguments = parser.parse_args()
-    frames = sorted(path for path in arguments.frames.rglob("*.png") if not path.with_suffix(".teacher.npy").exists())
+    sessions = sorted({path.parent for path in arguments.frames.rglob("*.png")})
+    for session in sessions:
+        share = mark_static(session)
+        if share is not None:
+            print(f"{session.relative_to(arguments.frames)}: {share * 100:.1f} percent static interface")
+    frames = sorted(path for path in arguments.frames.rglob("*.png") if path.name != "static.png" and not path.with_suffix(".teacher.npy").exists())
     if not frames:
-        raise SystemExit(f"no unlabelled frames in {arguments.frames}")
+        print("every frame is already labelled")
+        return
     options = onnxruntime.SessionOptions()
     width, height = TEACHER_SIZE
     for name, value in (("batch_size", 1), ("height", height), ("width", width)):

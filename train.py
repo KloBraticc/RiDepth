@@ -3,9 +3,9 @@ import random
 from pathlib import Path
 
 import torch
-from torch.utils.data import ConcatDataset, DataLoader
+from torch.utils.data import ConcatDataset, DataLoader, WeightedRandomSampler
 
-from ridepth.data import GameplayDepth, RobloxDepth, find_gameplay, find_samples
+from ridepth.data import GameplayDepth, RobloxDepth, find_gameplay, find_samples, split_gameplay
 from ridepth.losses import align_scale, depth_losses, normalize_target
 from ridepth.model import VARIANTS, RiDepthNet
 
@@ -16,7 +16,7 @@ def teacher_losses(disparity, normals, teacher_disparity, teacher_normals):
     everything = torch.ones_like(teacher_disparity, dtype=torch.bool)
     target = normalize_target(teacher_disparity, everything)
     return {
-        "teacher_depth": (align_scale(disparity, target) - target).abs().mean(),
+        "teacher_depth": (align_scale(disparity, target, everything.float()) - target).abs().mean(),
         "teacher_normal": (1 - (normals * teacher_normals).sum(1)).mean(),
     }
 
@@ -63,6 +63,7 @@ def main():
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--variant", choices=sorted(VARIANTS), default="base")
     parser.add_argument("--teacher", type=Path)
+    parser.add_argument("--studio-share", type=float, default=0.25)
     arguments = parser.parse_args()
 
     samples = find_samples(arguments.data)
@@ -70,13 +71,15 @@ def main():
     if len(samples) + len(frames) < 20:
         raise SystemExit(f"found only {len(samples) + len(frames)} samples, capture more first")
     random.Random(7).shuffle(samples)
-    random.Random(7).shuffle(frames)
     sample_split = min(len(samples), max(1, len(samples) // 10))
-    frame_split = min(len(frames), max(1, len(frames) // 10))
-    train_set = ConcatDataset([RobloxDepth(samples[sample_split:], augment=True), GameplayDepth(frames[frame_split:], augment=True)])
-    validation_set = ConcatDataset([RobloxDepth(samples[:sample_split], augment=False), GameplayDepth(frames[:frame_split], augment=False)])
-    print(f"training on {len(samples) - sample_split} Studio samples and {len(frames) - frame_split} gameplay frames, "
-          f"validating on {sample_split} and {frame_split}")
+    train_frames, held_frames = split_gameplay(frames)
+    studio_train = RobloxDepth(samples[sample_split:], augment=True)
+    gameplay_train = GameplayDepth(train_frames, augment=True)
+    train_set = ConcatDataset([studio_train, gameplay_train])
+    validation_set = ConcatDataset([RobloxDepth(samples[:sample_split], augment=False), GameplayDepth(held_frames, augment=False)])
+    held_games = sorted({frame.parent.parent.name for frame in held_frames})
+    print(f"training on {len(studio_train)} Studio samples and {len(gameplay_train)} gameplay frames, "
+          f"validating on {sample_split} Studio samples and {len(held_frames)} frames from unseen games {held_games}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = VARIANTS[arguments.variant](pretrained=arguments.resume is None).to(device)
@@ -93,8 +96,13 @@ def main():
     schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, arguments.epochs)
     scaler = torch.amp.GradScaler(enabled=device.type == "cuda")
 
-    train_loader = DataLoader(train_set, arguments.batch, shuffle=True, num_workers=arguments.workers, pin_memory=True, drop_last=True)
-    validation_loader = DataLoader(validation_set, arguments.batch, num_workers=arguments.workers, pin_memory=True)
+    share = arguments.studio_share if len(studio_train) and len(gameplay_train) else 0.5
+    weights = [share / max(len(studio_train), 1)] * len(studio_train) + [(1 - share) / max(len(gameplay_train), 1)] * len(gameplay_train)
+    sampler = WeightedRandomSampler(weights, len(train_set), replacement=True)
+    train_loader = DataLoader(train_set, arguments.batch, sampler=sampler, num_workers=arguments.workers, pin_memory=True,
+                              drop_last=True, persistent_workers=arguments.workers > 0)
+    validation_loader = DataLoader(validation_set, arguments.batch, num_workers=arguments.workers, pin_memory=True,
+                                   persistent_workers=arguments.workers > 0)
     arguments.runs.mkdir(parents=True, exist_ok=True)
     best = float("inf")
     for epoch in range(1, arguments.epochs + 1):
