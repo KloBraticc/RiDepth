@@ -12,7 +12,7 @@ Both take any width and height and return depth and normals at the input size.
 ## Targets and losses
 
 - **Depth** is trained as disparity, one over depth, with sky at 0. Each target is divided by its 95th percentile and the prediction is matched to it with a single best scale, so the model learns shape and order rather than absolute studs. Sky stays at 0 because no offset is allowed.
-- **Gameplay frames** carry relative disparity from the teacher, which has an unknown offset, so the prediction is matched to them with a best scale and offset. The Studio samples keep pinning the sky at 0. Pixels under the interface mask are left out of every term.
+- **Gameplay frames** carry relative disparity from the teacher, which has an unknown offset, so the prediction is matched to them with a best scale and offset. Where the teacher puts sky at its far plane, a sky term pushes the model's output, divided by its own 95th percentile, towards 0, so open sky stays at 0 in real games as well as in Studio. Pixels under the interface mask are left out of every term.
 - **Gradient loss** compares edges across four scales, which keeps outlines sharp.
 - **Normal loss** is one minus the cosine between predicted and true surface direction, on solid pixels only.
 - **Distillation** (Tiny only) adds the same depth and normal losses against the teacher's predictions.

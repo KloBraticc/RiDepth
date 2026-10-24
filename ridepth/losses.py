@@ -2,14 +2,19 @@ import torch
 import torch.nn.functional as F
 
 GRADIENT_SCALES = 4
+SKY_LEVEL = 0.02
 
 
-def normalize_target(disparity, solid):
+def percentile_scale(disparity, solid):
     scales = []
     for target, mask in zip(disparity, solid):
         values = target[mask]
         scales.append(torch.quantile(values, 0.95) if values.numel() > 16 else target.new_tensor(1.0))
-    return disparity / torch.stack(scales).clamp(min=1e-6).view(-1, 1, 1)
+    return torch.stack(scales).clamp(min=1e-6).view(-1, 1, 1)
+
+
+def normalize_target(disparity, solid):
+    return disparity / percentile_scale(disparity, solid)
 
 
 def masked_mean(values, mask):
@@ -56,8 +61,10 @@ def depth_losses(disparity, normals, target_disparity, target_normals, solid, ex
     target = normalize_target(target_disparity, solid)
     mask = (solid | exact).float()
     aligned = torch.where(exact, align_scale(disparity, target, mask), align_scale_shift(disparity, target, mask))
+    sky = solid & ~exact & (target < SKY_LEVEL)
     return {
         "depth": masked_mean((aligned - target).abs(), mask),
         "gradient": gradient_loss(aligned, target, mask),
         "normal": normal_loss(normals, target_normals, (solid & exact).float()),
+        "sky": masked_mean(disparity / percentile_scale(disparity.detach(), solid & ~sky), sky.float()),
     }

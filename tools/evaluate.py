@@ -8,10 +8,8 @@ from PIL import Image
 from torch.utils.data import DataLoader
 
 from ridepth.data import MEAN, STD, GameplayDepth, RobloxDepth, find_gameplay, find_samples, split_gameplay
-from ridepth.losses import align_scale, align_scale_shift, depth_losses, normalize_target
+from ridepth.losses import SKY_LEVEL, align_scale, align_scale_shift, depth_losses, normalize_target
 from ridepth.model import VARIANTS
-
-SKY_LEVEL = 0.02
 
 
 def load(spec: str, device):
