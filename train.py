@@ -9,7 +9,7 @@ from ridepth.data import GameplayDepth, RobloxDepth, find_gameplay, find_samples
 from ridepth.losses import align_scale, depth_losses, normalize_target
 from ridepth.model import VARIANTS
 
-WEIGHTS = {"depth": 1.0, "gradient": 0.5, "normal": 0.5, "sky": 0.5, "teacher_depth": 0.5, "teacher_normal": 0.25}
+WEIGHTS = {"depth": 1.0, "gradient": 0.5, "normal": 0.5, "sky": 0.5, "teacher_depth": 0.5, "teacher_normal": 0.25, "edge": 1.0, "planar": 2.0}
 SCORED = ("depth", "gradient", "normal")
 
 
