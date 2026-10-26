@@ -1,6 +1,6 @@
 {
   "meta": {
-    "date": "2026-10-24",
+    "date": "2026-10-26",
     "device": "a GitHub Actions Windows runner CPU",
     "runtime": "1.31.0",
     "precision": "full precision",
@@ -11,24 +11,24 @@
       "name": "Depth Anything V2 Small",
       "megabytes": 94.5,
       "milliseconds": {
-        "266": 98.571,
-        "518": 405.564
+        "266": 94.188,
+        "518": 411.484
       }
     },
     {
       "name": "RiDepth",
       "megabytes": 13.9,
       "milliseconds": {
-        "266": 30.442,
-        "518": 118.911
+        "266": 30.475,
+        "518": 115.325
       }
     },
     {
       "name": "RiDepth Tiny",
       "megabytes": 3.7,
       "milliseconds": {
-        "266": 4.688,
-        "518": 15.692
+        "266": 4.77,
+        "518": 15.418
       }
     }
   ]
